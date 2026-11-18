@@ -28,6 +28,10 @@
 #               your own, or to "" to skip.
 #   DISK_GB  disk size of the image; default 80 for macos (the base has 50, of which 12 are
 #            free) and 40 for linux (the base has 20)
+#   KVM_OUT  for linux, a directory to also leave the image in as a disk for Linux hosts
+#            (disk.qcow2 and config.json), which scripts/push-kvm.sh publishes. It is the same
+#            arm64 disk, since Tart's Linux VMs boot the way QEMU's do. Needs qemu-img, which
+#            is taken from Nix if it is not installed.
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -135,6 +139,12 @@ boot "--dir=flake:$stage:ro"
 
 say "Applying $CONFIG from $FLAKE (revision $revision)"
 guest_run "$provision" "$CONFIG" "$revision" "$BASE"
+if [ -n "${KVM_OUT:-}" ]; then
+	# Who jobs run as, which a Linux host must know before it starts a VM.
+	job_user=$(tart exec "$NAME" id -un)
+	job_uid=$(tart exec "$NAME" id -u)
+	job_gid=$(tart exec "$NAME" id -g)
+fi
 halt
 
 # A second boot, with nothing shared, is what a job gets: it proves the configuration
@@ -144,6 +154,20 @@ if [ -n "$SMOKE_TEST" ]; then
 	boot
 	guest_run "$SMOKE_TEST"
 	halt
+fi
+
+if [ -n "${KVM_OUT:-}" ]; then
+	[ "$OS" = linux ] || { echo "build.sh: KVM_OUT is for OS=linux" >&2; exit 2; }
+	say "Writing the disk for Linux hosts to $KVM_OUT"
+	mkdir -p "$KVM_OUT"
+	disk=${TART_HOME:-$HOME/.tart}/vms/$NAME/disk.img
+	if command -v qemu-img >/dev/null; then
+		qemu-img convert -c -O qcow2 "$disk" "$KVM_OUT/disk.qcow2"
+	else
+		nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#qemu-utils --command \
+			qemu-img convert -c -O qcow2 "$disk" "$KVM_OUT/disk.qcow2"
+	fi
+	printf '{"architecture":"arm64","os":"linux","user":"%s","uid":%s,"gid":%s}\n' "$job_user" "$job_uid" "$job_gid" > "$KVM_OUT/config.json"
 fi
 
 if [ -n "$push" ]; then

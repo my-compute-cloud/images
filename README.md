@@ -2,7 +2,8 @@
 
 The virtual machine images that [My Compute Cloud](https://mycompute.cloud) jobs run in, and
 the means to build your own. An image is a macOS or Linux VM for [Tart](https://tart.run),
-stored in a container registry. What goes into one is in this repository, so you can read
+stored in a container registry; the Linux one can also be built as a disk for
+[Linux hosts](#images-for-linux-hosts). What goes into one is in this repository, so you can read
 exactly what a job gets, and change it:
 
 - **macOS:** a [nix-darwin](https://github.com/nix-darwin/nix-darwin) configuration declares
@@ -202,6 +203,46 @@ by default; `mcc.runner.user`), `sudo` without a password, and the Tart guest ag
 [`macos-*-base` images](https://github.com/cirruslabs/macos-image-templates) have all three.
 For Linux: an Ubuntu VM with the guest agent running as a user that has `sudo` without a
 password, as in Cirrus Labs' `ubuntu` image.
+
+## Images for Linux hosts
+
+A My Compute Cloud host can also be a Linux machine, which runs Linux jobs in VMs under QEMU
+with KVM. It cannot use a Tart image. It takes the same Ubuntu configuration as a qcow2 disk,
+kept in a registry as an OCI artifact: the disk in pieces as the layers, and a small config
+that names the job's user. One tag can hold an x86_64 and an arm64 disk; a host takes its own.
+
+There are two ways to build the disk, both from
+[scripts/provision-linux.sh](scripts/provision-linux.sh):
+
+- **On a Mac,** with the Tart build. The disk of a Tart Linux VM boots under QEMU as it is,
+  so the build only has to write it out. This gives arm64:
+
+  ```bash
+  OS=linux KVM_OUT=./mcc-image-ubuntu-arm64 scripts/build.sh
+  ```
+
+- **On a Linux machine with KVM,** from Ubuntu's cloud image, for that machine's
+  architecture. This is the only way to x86_64:
+
+  ```bash
+  scripts/build-kvm.sh
+  ```
+
+Either leaves a directory with `disk.qcow2` and `config.json`. A host can use that directory
+directly, by its full path as the image's source, or you publish it:
+
+```bash
+scripts/push-kvm.sh ./mcc-image-ubuntu-arm64 ghcr.io/your-org/ubuntu-runner-kvm:24.04
+```
+
+That pushes `24.04-arm64` and points `24.04` at every architecture pushed so far.
+
+A Linux host has no guest agent to run a job through. It makes an SSH key for each VM and
+passes the public half in as a systemd credential, which only the host can set. The image's
+`mcc-guest-access` service, installed by the provisioning script, makes that the job user's
+only authorized key before SSH starts listening and turns password logins off. Under Tart
+there is no such credential and the service does not run. The check at the end of
+`build-kvm.sh` gets in that way, so an image that passes it will let a host in.
 
 ## Publishing
 
