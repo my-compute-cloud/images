@@ -1,5 +1,5 @@
 {
-  description = "VM images for My Compute Cloud runners, declared with Nix";
+  description = "VM images for My Compute Cloud runners: a nix-darwin system for macOS, Nix-pinned tools on Ubuntu for Linux";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";

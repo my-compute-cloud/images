@@ -2,9 +2,18 @@
 
 The virtual machine images that [My Compute Cloud](https://mycompute.cloud) jobs run in, and
 the means to build your own. An image is a macOS or Linux VM for [Tart](https://tart.run),
-stored in a container registry. Its contents are declared with Nix in this repository
-([nix-darwin](https://github.com/nix-darwin/nix-darwin) for macOS, a package on top of Ubuntu
-for Linux), so you can read exactly what a job gets, and change it.
+stored in a container registry. What goes into one is in this repository, so you can read
+exactly what a job gets, and change it:
+
+- **macOS:** a [nix-darwin](https://github.com/nix-darwin/nix-darwin) configuration declares
+  the system, applied on top of a base macOS VM.
+- **Linux:** Ubuntu, so that workflows written for `ubuntu-latest` keep working (`apt-get`,
+  libraries where prebuilt programs expect them). Docker, the compilers and the runner's
+  libraries are installed with apt by [a script](scripts/provision-linux.sh); only the tools
+  and the job environment are a Nix package. It is Ubuntu with Nix-pinned tools, not a system
+  built by Nix.
+
+The two share one tool list and one cache setup in the flake.
 
 How images fit into the service is explained at <https://mycompute.cloud/docs/images>.
 
@@ -151,7 +160,7 @@ BASE=ghcr.io/cirruslabs/macos-tahoe-xcode:latest IMAGE=ghcr.io/your-org/macos-ru
 
 ### Your own Linux image
 
-The Linux image is Ubuntu with one Nix package on top, which holds the tools and the job
+The Nix part of the Linux image is one package, which holds the tools and the job
 environment. `lib.linuxRunner` makes that package with your additions:
 
 ```nix
