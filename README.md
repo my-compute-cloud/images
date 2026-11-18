@@ -1,17 +1,19 @@
 # Runner images for My Compute Cloud
 
 The virtual machine images that [My Compute Cloud](https://mycompute.cloud) jobs run in, and
-the means to build your own. An image is a macOS VM for [Tart](https://tart.run), stored in a
-container registry. Its contents are declared with [nix-darwin](https://github.com/nix-darwin/nix-darwin)
-in this repository, so you can read exactly what a job gets, and change it.
+the means to build your own. An image is a macOS or Linux VM for [Tart](https://tart.run),
+stored in a container registry. Its contents are declared with Nix in this repository
+([nix-darwin](https://github.com/nix-darwin/nix-darwin) for macOS, a package on top of Ubuntu
+for Linux), so you can read exactly what a job gets, and change it.
 
 How images fit into the service is explained at <https://mycompute.cloud/docs/images>.
 
 ## Published images
 
-| Image | macOS | Contents |
+| Image | System | Contents |
 |---|---|---|
-| `ghcr.io/my-compute-cloud/macos-runner:tahoe` | 26 (Tahoe) | The tools below. No Xcode. |
+| `ghcr.io/my-compute-cloud/macos-runner:tahoe` | macOS 26 (Tahoe), arm64 | The tools below. No Xcode. |
+| `ghcr.io/my-compute-cloud/ubuntu-runner:24.04` | Ubuntu 24.04, arm64 | The tools below, and Docker for container jobs and services. |
 
 Each build is also pushed with a dated tag, such as `tahoe-20261117`, which never moves. Use
 the dated tag when a workflow must not change underneath you, and the plain one to follow
@@ -19,20 +21,25 @@ along.
 
 ## What is in an image
 
-The command-line tools of GitHub's hosted macOS image, by name, at the versions of the
-nixpkgs revision pinned in [flake.lock](flake.lock). The list is [modules/tools.nix](modules/tools.nix):
+The command-line tools of GitHub's hosted images, by name, at the versions of the nixpkgs
+revision pinned in [flake.lock](flake.lock). Both images get the same list,
+[modules/tools.nix](modules/tools.nix), apart from what only makes sense on one:
 
-- **Languages:** Node.js 22, Python 3, Ruby 3.3, Go, Rust, Java 21, Kotlin, .NET 8, Perl, and
-  GCC and GNU Fortran under versioned names such as `gcc-15`
-- **Package and project tools:** npm, Yarn, pipx, Bundler, CocoaPods, vcpkg, Maven, Gradle, Ant
-- **Utilities:** Git, Git LFS, GitHub CLI, jq, yq, wget, aria2, GnuPG, zstd, 7-Zip, GNU tar
-  (as `gtar`), OpenSSL, pkgconf, Ninja, Bazelisk
-- **Tools:** CMake, AWS CLI, AWS SAM CLI, Session Manager plugin, Azure CLI, Bicep, PowerShell,
-  fastlane, SwiftFormat, xcbeautify, xcodes
-- **From the base image:** Homebrew, Apple's command-line developer tools, Rosetta
+- **Languages:** Node.js 22, Python 3, Ruby 3.3, Go, Rust, Java 21, Kotlin, .NET 8, Perl
+- **Package and project tools:** npm, Yarn, pipx, Bundler, vcpkg, Maven, Gradle, Ant
+- **Utilities:** Git, Git LFS, GitHub CLI, jq, yq, wget, aria2, GnuPG, zstd, 7-Zip, OpenSSL,
+  pkgconf, Ninja, Bazelisk
+- **Tools:** CMake, AWS CLI, AWS SAM CLI, Session Manager plugin, Azure CLI, Bicep, PowerShell
 - **Nix**, with flakes enabled, for jobs that bring their own environment
+- **macOS only:** CocoaPods, fastlane, SwiftFormat, xcbeautify, xcodes, GNU tar as `gtar`, GCC
+  and GNU Fortran under versioned names such as `gcc-15`; and from the base image, Homebrew,
+  Apple's command-line developer tools and Rosetta
+- **Linux only:** Docker with Buildx and Compose, and Ubuntu's own compilers (`build-essential`)
 
-### Differences from GitHub's hosted image
+### Differences from GitHub's hosted images
+
+The Linux image is arm64, because the Macs that run it are; GitHub's `ubuntu-latest` is x86.
+Container images a job uses must be available for arm64.
 
 | | GitHub-hosted | These images |
 |---|---|---|
@@ -59,6 +66,12 @@ That clones the base VM, boots it, applies the configuration inside it, restarts
 that a job would find its tools. It leaves a stopped VM named `mcc-image-tahoe` that you can
 look at with `tart run mcc-image-tahoe`. The first build downloads a 27 GB base image; after
 that a build takes about ten minutes.
+
+For the Linux image, which builds in about five minutes on a 5 GB base:
+
+```bash
+OS=linux scripts/build.sh
+```
 
 To add your own tools, make a flake that imports this one's module:
 
@@ -136,12 +149,50 @@ private registry:
 BASE=ghcr.io/cirruslabs/macos-tahoe-xcode:latest IMAGE=ghcr.io/your-org/macos-runner TAGS=tahoe-xcode scripts/build.sh --push
 ```
 
+### Your own Linux image
+
+The Linux image is Ubuntu with one Nix package on top, which holds the tools and the job
+environment. `lib.linuxRunner` makes that package with your additions:
+
+```nix
+{
+  inputs.images.url = "github:my-compute-cloud/images";
+
+  outputs =
+    { images, ... }:
+    {
+      packages.aarch64-linux.runner =
+        let
+          pkgs = images.inputs.nixpkgs.legacyPackages.aarch64-linux;
+        in
+        images.lib.linuxRunner {
+          inherit pkgs;
+          extraPackages = [ pkgs.terraform ];
+          extraJobSetup = "export MY_SETTING=value";
+        };
+    };
+}
+```
+
+```bash
+OS=linux FLAKE=/path/to/your/flake IMAGE=ghcr.io/your-org/ubuntu-runner /path/to/images/scripts/build.sh --push
+```
+
+A Linux job's whole environment, `PATH` included, is set in `/etc/mcc/job-env`, which the
+agent reads just before it starts the runner; `extraJobSetup` is appended to it. Packages from
+apt are installed by [scripts/provision-linux.sh](scripts/provision-linux.sh).
+
+To have container images such as `mysql:8.4` already in every job's VM, you do not need your
+own image: list them in the agent's `preload_images` policy on the host.
+
 ### What a base image must have
 
 The configuration is applied on top of a Tart VM that already has an auto-login user (`admin`
 by default; `mcc.runner.user`), `sudo` without a password, and the Tart guest agent at
 `/opt/homebrew/bin/tart-guest-agent` (`mcc.runner.guestAgent`). Cirrus Labs'
 [`macos-*-base` images](https://github.com/cirruslabs/macos-image-templates) have all three.
+For Linux: an Ubuntu VM with the guest agent running as a user that has `sudo` without a
+password, as in Cirrus Labs' `ubuntu` image.
 
 ## Publishing
 
@@ -149,6 +200,10 @@ For maintainers. On a Mac signed in to the registry with `tart login ghcr.io`:
 
 ```bash
 scripts/build.sh --push
+```
+
+```bash
+OS=linux scripts/build.sh --push
 ```
 
 The [Build image](.github/workflows/build.yml) workflow does the same on a self-hosted runner

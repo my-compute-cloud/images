@@ -9,14 +9,20 @@ permissions:
   contents: read
 
 jobs:
-  # Builds the complete system that an image is made from, without making an image: that needs
-  # a VM, which GitHub's hosted Macs cannot run.
+  # Builds everything an image is made from, without making an image: that needs a VM, which
+  # GitHub's hosted Macs cannot run. macOS builds the nix-darwin system; Linux the runner package.
   system:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
       - run: nix flake check -L
       - name: Scripts parse
-        run: sh -n scripts/build.sh && bash -n scripts/provision.sh && bash -n scripts/smoke-test.sh
+        run: |
+          sh -n scripts/build.sh
+          for f in scripts/provision.sh scripts/provision-linux.sh scripts/smoke-test.sh scripts/smoke-test-linux.sh; do bash -n "$f"; done

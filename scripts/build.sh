@@ -3,24 +3,31 @@
 #
 #   scripts/build.sh [--push]
 #
-# It clones a base VM, boots it, applies this repository's nix-darwin configuration inside it,
-# checks the result the way a job would see it, and leaves a stopped VM named $NAME. Needs an
-# Apple Silicon Mac with Tart (https://tart.run); pushing needs `tart login` to the registry.
+# It clones a base VM, boots it, applies this repository's Nix configuration inside it, checks
+# the result the way a job would see it, and leaves a stopped VM named $NAME. Needs an Apple
+# Silicon Mac with Tart (https://tart.run); pushing needs `tart login` to the registry.
 #
 # Settings, all optional, from the environment:
-#   MACOS    macOS release of the base image: tahoe (default) or sequoia
-#   BASE     base image; default ghcr.io/cirruslabs/macos-$MACOS-base:latest
+#   OS       guest to build: macos (default) or linux
+#   MACOS    for macos, the release of the base image: tahoe (default) or sequoia
+#   BASE     base image; default ghcr.io/cirruslabs/macos-$MACOS-base:latest, or
+#            ghcr.io/cirruslabs/ubuntu:latest for linux
 #   FLAKE    directory of the flake to apply; default this repository
-#   CONFIG   darwinConfigurations attribute in that flake; default runner
-#   NAME     local VM name; default mcc-image-$MACOS (replaced if it exists)
-#   IMAGE    where --push publishes; default ghcr.io/my-compute-cloud/macos-runner
+#   CONFIG   what to apply from that flake: for macos a darwinConfigurations attribute, for
+#            linux a package (packages.<system>.<name>); default runner
+#   NAME     local VM name; default mcc-image-$MACOS or mcc-image-ubuntu (replaced if it exists)
+#   IMAGE    where --push publishes; default ghcr.io/my-compute-cloud/macos-runner or
+#            ghcr.io/my-compute-cloud/ubuntu-runner
 #   PUSH_OPTIONS  extra options for `tart push`. Default for ghcr.io: uploads in 3 MB chunks,
 #                 because sending a whole layer in one request times out on a slow uplink.
 #   SOURCE_URL  repository the pushed image is linked to on ghcr.io; default this one
-#   TAGS     space-separated tags to push; default "$MACOS $MACOS-<today>"
-#   SMOKE_TEST  script run inside the finished image; default scripts/smoke-test.sh, which
-#               expects this repository's tools. Set it to your own, or to "" to skip.
-#   DISK_GB  disk size of the image; default 80 (the base has 50, of which 12 are free)
+#   TAGS     space-separated tags to push; default "$MACOS $MACOS-<today>", or
+#            "24.04 24.04-<today>" for linux
+#   SMOKE_TEST  script run inside the finished image; default scripts/smoke-test.sh or
+#               scripts/smoke-test-linux.sh, which expect this repository's tools. Set it to
+#               your own, or to "" to skip.
+#   DISK_GB  disk size of the image; default 80 for macos (the base has 50, of which 12 are
+#            free) and 40 for linux (the base has 20)
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,19 +39,37 @@ for arg in "$@"; do
 	esac
 done
 
-MACOS=${MACOS:-tahoe}
-BASE=${BASE:-ghcr.io/cirruslabs/macos-$MACOS-base:latest}
+OS=${OS:-macos}
+today=$(date -u +%Y%m%d)
+case $OS in
+	macos)
+		MACOS=${MACOS:-tahoe}
+		BASE=${BASE:-ghcr.io/cirruslabs/macos-$MACOS-base:latest}
+		NAME=${NAME:-mcc-image-$MACOS}
+		IMAGE=${IMAGE:-ghcr.io/my-compute-cloud/macos-runner}
+		TAGS=${TAGS:-"$MACOS $MACOS-$today"}
+		DISK_GB=${DISK_GB:-80}
+		provision=$root/scripts/provision.sh
+		smoke=$root/scripts/smoke-test.sh
+		;;
+	linux)
+		BASE=${BASE:-ghcr.io/cirruslabs/ubuntu:latest}
+		NAME=${NAME:-mcc-image-ubuntu}
+		IMAGE=${IMAGE:-ghcr.io/my-compute-cloud/ubuntu-runner}
+		TAGS=${TAGS:-"24.04 24.04-$today"}
+		DISK_GB=${DISK_GB:-40}
+		provision=$root/scripts/provision-linux.sh
+		smoke=$root/scripts/smoke-test-linux.sh
+		;;
+	*) echo "build.sh: OS must be macos or linux" >&2; exit 2 ;;
+esac
 FLAKE=${FLAKE:-$root}
 CONFIG=${CONFIG:-runner}
-NAME=${NAME:-mcc-image-$MACOS}
-IMAGE=${IMAGE:-ghcr.io/my-compute-cloud/macos-runner}
-TAGS=${TAGS:-"$MACOS $MACOS-$(date -u +%Y%m%d)"}
-DISK_GB=${DISK_GB:-80}
 case $IMAGE in
 	ghcr.io/*) PUSH_OPTIONS=${PUSH_OPTIONS-"--chunk-size 3 --concurrency 8"} ;;
 	*) PUSH_OPTIONS=${PUSH_OPTIONS-} ;;
 esac
-SMOKE_TEST=${SMOKE_TEST-$root/scripts/smoke-test.sh}
+SMOKE_TEST=${SMOKE_TEST-$smoke}
 
 command -v tart >/dev/null || { echo "build.sh: tart is not installed (https://tart.run)" >&2; exit 1; }
 [ -f "$FLAKE/flake.nix" ] || { echo "build.sh: no flake.nix in $FLAKE" >&2; exit 1; }
@@ -95,11 +120,21 @@ halt() {
 	vm_pid=
 }
 
+# Runs a script from this repository inside the VM. It is copied in first rather than fed to
+# a shell on standard input, where any command that reads its input would swallow the rest.
+guest_run() {
+	script=$1
+	shift
+	tart exec -i "$NAME" /bin/bash -c 'cat > /tmp/mcc-build-step.sh' < "$script"
+	tart exec "$NAME" /bin/bash /tmp/mcc-build-step.sh "$@"
+	tart exec "$NAME" /bin/rm -f /tmp/mcc-build-step.sh
+}
+
 say "Booting"
 boot "--dir=flake:$stage:ro"
 
 say "Applying $CONFIG from $FLAKE (revision $revision)"
-tart exec -i "$NAME" /bin/bash -s -- "$CONFIG" "$revision" "$BASE" < "$root/scripts/provision.sh"
+guest_run "$provision" "$CONFIG" "$revision" "$BASE"
 halt
 
 # A second boot, with nothing shared, is what a job gets: it proves the configuration
@@ -107,7 +142,7 @@ halt
 if [ -n "$SMOKE_TEST" ]; then
 	say "Checking the image as a job would see it"
 	boot
-	tart exec -i "$NAME" /bin/bash -s < "$SMOKE_TEST"
+	guest_run "$SMOKE_TEST"
 	halt
 fi
 

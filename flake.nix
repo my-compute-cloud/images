@@ -1,5 +1,5 @@
 {
-  description = "VM images for My Compute Cloud runners, declared with nix-darwin";
+  description = "VM images for My Compute Cloud runners, declared with Nix";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
@@ -18,21 +18,39 @@
     let
       system = "aarch64-darwin";
       pkgs = nixpkgs.legacyPackages.${system};
+      linuxSystems = [
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
+      forLinux = f: nixpkgs.lib.genAttrs linuxSystems (s: f nixpkgs.legacyPackages.${s});
     in
     {
-      # The whole runner configuration as a module, so that your own flake can import it and
-      # add to it. See "Build your own image" in the README.
+      # macOS: the whole runner configuration as a nix-darwin module, so that your own flake
+      # can import it and add to it. See "Build your own image" in the README.
       darwinModules.runner = ./modules/runner.nix;
       darwinModules.default = self.darwinModules.runner;
 
-      # What scripts/build.sh applies inside the VM: `darwin-rebuild switch --flake .#runner`.
+      # What scripts/build.sh applies inside a macOS VM: `darwin-rebuild switch --flake .#runner`.
       darwinConfigurations.runner = nix-darwin.lib.darwinSystem {
         modules = [ self.darwinModules.runner ];
       };
 
-      # `nix flake check` builds the complete system, so a package that stops building is
-      # caught before an image is.
-      checks.${system}.runner = self.darwinConfigurations.runner.system;
+      # Linux: the tools and the job environment, as one package that scripts/build.sh installs
+      # inside an Ubuntu VM. lib.linuxRunner makes the same with your additions.
+      lib.linuxRunner = args: import ./modules/linux.nix ({ inherit (args.pkgs) lib; } // args);
+      packages = forLinux (pkgs: {
+        runner = self.lib.linuxRunner { inherit pkgs; };
+      });
+
+      # `nix flake check` builds everything an image is made from, so a package that stops
+      # building is caught before an image is.
+      checks =
+        forLinux (pkgs: {
+          runner = self.packages.${pkgs.stdenv.hostPlatform.system}.runner;
+        })
+        // {
+          ${system}.runner = self.darwinConfigurations.runner.system;
+        };
 
       formatter.${system} = pkgs.nixfmt-rfc-style;
     };

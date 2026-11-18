@@ -1,6 +1,7 @@
-# The command-line tools in the image, grouped as in the software list of GitHub's hosted
-# macOS image (https://github.com/actions/runner-images/tree/main/images/macos), which this
-# list follows. Versions are whatever the pinned nixpkgs has, not GitHub's.
+# The command-line tools in the images, grouped as in the software lists of GitHub's hosted
+# images (https://github.com/actions/runner-images/tree/main/images), which this list follows.
+# Versions are whatever the pinned nixpkgs has, not GitHub's. The macOS and Linux images get
+# the same tools, apart from the few that only make sense on one.
 #
 # Left out on purpose:
 #   - Xcode and simulators: Apple's licence does not let us redistribute them. Build your own
@@ -10,8 +11,8 @@
 #   - GNU replacements for system tools (sed, tar, coreutils): the hosted image keeps Apple's
 #     as the defaults, so we do too. GNU tar is there as `gtar`, as on the hosted image.
 #
-# Nothing here may shadow a tool that macOS provides. `cc`, `gcc`, `ld`, `bash` and the like
-# stay Apple's; scripts/smoke-test.sh checks that.
+# Nothing here may shadow a tool that the operating system provides. `cc`, `gcc`, `ld`, `bash`
+# and the like stay Apple's on macOS and Ubuntu's on Linux; the smoke tests check that.
 { lib, pkgs }:
 let
   # GCC under versioned names only (gcc-15, g++-15, gfortran-15, and gfortran, which Apple
@@ -36,13 +37,12 @@ in
 {
   languages = with pkgs; [
     dotnet-sdk_8
-    gnuCompilers
     go
     jdk21
     kotlin
     nodejs_22
     perl
-    # modules/runner.nix makes a virtual environment of this the default python3 and pip3.
+    # The runner configurations make a virtual environment of this the default python3 and pip3.
     python3
     ruby_3_3
     # Rust comes from nixpkgs rather than rustup, so that its version is pinned with the rest.
@@ -54,7 +54,6 @@ in
 
   packageManagers = with pkgs; [
     bundler
-    cocoapods
     pipx
     vcpkg
     yarn
@@ -74,7 +73,6 @@ in
     git
     git-lfs
     gnupg
-    gtar
     jq
     ninja
     openssl
@@ -90,9 +88,17 @@ in
     azure-cli
     bicep
     cmake
-    fastlane
     powershell
     ssm-session-manager-plugin
+  ];
+}
+// lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+  # For building Apple software, and the GNU tools that Ubuntu has anyway.
+  apple = with pkgs; [
+    cocoapods
+    fastlane
+    gnuCompilers
+    gtar
     swiftformat
     xcbeautify
     xcodes

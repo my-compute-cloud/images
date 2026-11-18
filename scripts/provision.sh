@@ -46,3 +46,5 @@ printf '{"configuration":"%s","revision":"%s","base":"%s","built_at":"%s"}\n' \
 rm -rf "$work"
 sudo nix-collect-garbage -d >/dev/null 2>&1
 df -h / | tail -1
+# The VM is stopped next; nothing written above may still be only in memory.
+sync

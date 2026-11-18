@@ -6,8 +6,13 @@ name: Build image
 on:
   workflow_dispatch:
     inputs:
+      os:
+        description: Guest to build
+        type: choice
+        default: macos
+        options: [macos, linux]
       macos:
-        description: macOS release of the base image
+        description: For macos, the release of the base image
         type: choice
         default: tahoe
         options: [tahoe, sequoia]
@@ -21,13 +26,14 @@ permissions:
   packages: write
 
 concurrency:
-  group: build-${{ inputs.macos }}
+  group: build-${{ inputs.os }}-${{ inputs.macos }}
 
 jobs:
   build:
     runs-on: [self-hosted, macOS, ARM64, tart]
     timeout-minutes: 240
     env:
+      OS: ${{ inputs.os }}
       MACOS: ${{ inputs.macos }}
     steps:
       - uses: actions/checkout@v4
