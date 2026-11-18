@@ -14,10 +14,13 @@ nix_version=2.34.8
 
 sudo -n true 2>/dev/null || { echo "provision-linux.sh: this needs sudo without a password in the base image" >&2; exit 1; }
 
-# Linux guests do not mount the host's shares by themselves.
-if ! mountpoint -q "$shares"; then
+# The flake is either shared in by Tart, whose Linux guests do not mount the host's shares by
+# themselves, or was copied to the same place by build-kvm.sh.
+shared_by_tart=
+if [ ! -f "$shares/flake/flake.nix" ] && ! mountpoint -q "$shares"; then
 	sudo mkdir -p "$shares"
 	sudo mount -t virtiofs com.apple.virtio-fs.automount "$shares"
+	shared_by_tart=1
 fi
 [ -f "$shares/flake/flake.nix" ] || { echo "provision-linux.sh: the flake is not shared into this VM" >&2; exit 1; }
 rm -rf "$work"
@@ -29,7 +32,7 @@ sudo apt-get update -qq
 # Docker for container jobs and services; the compilers and tools Ubuntu's own image has; and
 # the libraries the Actions runner needs (its installdependencies.sh).
 sudo apt-get install -y -qq --no-install-recommends \
-	docker.io docker-buildx docker-compose-v2 \
+	docker.io docker-buildx docker-compose-v2 openssh-server \
 	build-essential ca-certificates curl git unzip zip xz-utils zstd rsync sudo tzdata locales \
 	libicu74 libkrb5-3 zlib1g libssl3t64 liblttng-ust1t64 >/dev/null
 sudo usermod -aG docker "$USER"
@@ -54,6 +57,48 @@ sudo "$(command -v nix-env)" --profile /nix/var/nix/profiles/mcc --set "$(readli
 sudo mkdir -p /etc/mcc
 sudo ln -sfn /nix/var/nix/profiles/mcc/share/mcc/job-env /etc/mcc/job-env
 
+# How a Linux host reaches the VM. A Mac host uses the Tart guest agent; a Linux host has
+# none, so it hands each VM a new SSH key as a systemd credential (an SMBIOS string, which
+# only the host can set), and this service lets that key, and nothing else, log in as the
+# job's user. Without the credential, as under Tart, the service does not run.
+echo "$USER" | sudo tee /etc/mcc/job-user >/dev/null
+sudo mkdir -p /usr/local/lib/mcc
+sudo tee /usr/local/lib/mcc/guest-access >/dev/null <<'GUEST_ACCESS'
+#!/bin/sh
+# Installed by My Compute Cloud's image build; run by mcc-guest-access.service.
+set -eu
+key=/run/credentials/@system/mcc.authorized_key
+[ -s "$key" ] || exit 0
+user=$(cat /etc/mcc/job-user)
+home=$(getent passwd "$user" | cut -d: -f6)
+group=$(id -gn "$user")
+install -d -m 700 -o "$user" -g "$group" "$home/.ssh"
+install -m 600 -o "$user" -g "$group" "$key" "$home/.ssh/authorized_keys"
+# The host's key is the only way in: the base image's password must not be another.
+printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\n' > /etc/ssh/sshd_config.d/00-mcc.conf
+GUEST_ACCESS
+sudo chmod 755 /usr/local/lib/mcc/guest-access
+sudo tee /etc/systemd/system/mcc-guest-access.service >/dev/null <<'GUEST_ACCESS'
+[Unit]
+Description=Let the My Compute Cloud host that started this VM run commands in it
+ConditionPathExists=/run/credentials/@system/mcc.authorized_key
+# Early, so that it is done before anything listens for SSH. Sockets come up before the
+# services that default dependencies would order this after.
+DefaultDependencies=no
+After=local-fs.target
+Before=sockets.target ssh.socket ssh.service shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/mcc/guest-access
+
+[Install]
+WantedBy=sysinit.target
+GUEST_ACCESS
+sudo systemctl enable mcc-guest-access.service >/dev/null 2>&1
+
 # Nix's Python is read-only, so `pip install` into it fails. A virtual environment on top of
 # it is writable and is what jobs find first on PATH.
 /nix/var/nix/profiles/mcc/bin/python3 -m venv --clear "$HOME/.python"
@@ -67,7 +112,11 @@ rm -rf "$work"
 sudo "$(command -v nix-collect-garbage)" -d >/dev/null
 sudo apt-get clean
 sudo rm -rf /var/lib/apt/lists/*
-sudo umount "$shares" 2>/dev/null || true
+if [ -n "$shared_by_tart" ]; then
+	sudo umount "$shares" 2>/dev/null || true
+else
+	sudo rm -rf "$shares/flake"
+fi
 df -h / | tail -1
 # The VM is stopped next; nothing written above may still be only in memory.
 sync
