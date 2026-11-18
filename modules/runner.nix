@@ -57,6 +57,15 @@ in
       type = lib.types.attrsOf lib.types.str;
       description = "Environment variables for jobs, other than PATH.";
     };
+
+    jobSetup = lib.mkOption {
+      type = lib.types.lines;
+      description = ''
+        Shell commands that My Compute Cloud's agent runs (sources) in each job's VM just
+        before the runner starts, for what cannot be a fixed environment variable. When the
+        host owner provides a cache, MCC_CACHE_DIR names it.
+      '';
+    };
   };
 
   config = {
@@ -106,6 +115,22 @@ in
       HOMEBREW_NO_AUTO_UPDATE = "1";
       HOMEBREW_NO_INSTALL_CLEANUP = "1";
     };
+
+    # A host owner may give jobs a directory that outlives them (the agent's cache_dir
+    # policy). Only download caches are put there: what they hold is checked against a
+    # lock file or a checksum when it is used, and several jobs can write to them at once.
+    mcc.runner.jobSetup = ''
+      if [ -n "''${MCC_CACHE_DIR:-}" ] && [ -w "$MCC_CACHE_DIR" ]; then
+        export npm_config_cache="$MCC_CACHE_DIR/npm"
+        export YARN_CACHE_FOLDER="$MCC_CACHE_DIR/yarn"
+        export PIP_CACHE_DIR="$MCC_CACHE_DIR/pip"
+        export UV_CACHE_DIR="$MCC_CACHE_DIR/uv"
+        export GOMODCACHE="$MCC_CACHE_DIR/go-mod"
+        export NUGET_PACKAGES="$MCC_CACHE_DIR/nuget"
+        export HOMEBREW_CACHE="$MCC_CACHE_DIR/homebrew"
+      fi
+    '';
+    environment.etc."mcc/job-env".text = cfg.jobSetup;
 
     # Installed as a file rather than as a nix-darwin launchd agent, which would restart the
     # guest agent during activation and cut off the build that is running through it. The new

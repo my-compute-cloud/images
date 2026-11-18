@@ -14,6 +14,8 @@
 #   CONFIG   darwinConfigurations attribute in that flake; default runner
 #   NAME     local VM name; default mcc-image-$MACOS (replaced if it exists)
 #   IMAGE    where --push publishes; default ghcr.io/my-compute-cloud/macos-runner
+#   PUSH_OPTIONS  extra options for `tart push`. Default for ghcr.io: uploads in 3 MB chunks,
+#                 because sending a whole layer in one request times out on a slow uplink.
 #   SOURCE_URL  repository the pushed image is linked to on ghcr.io; default this one
 #   TAGS     space-separated tags to push; default "$MACOS $MACOS-<today>"
 #   SMOKE_TEST  script run inside the finished image; default scripts/smoke-test.sh, which
@@ -38,6 +40,10 @@ NAME=${NAME:-mcc-image-$MACOS}
 IMAGE=${IMAGE:-ghcr.io/my-compute-cloud/macos-runner}
 TAGS=${TAGS:-"$MACOS $MACOS-$(date -u +%Y%m%d)"}
 DISK_GB=${DISK_GB:-80}
+case $IMAGE in
+	ghcr.io/*) PUSH_OPTIONS=${PUSH_OPTIONS-"--chunk-size 3 --concurrency 8"} ;;
+	*) PUSH_OPTIONS=${PUSH_OPTIONS-} ;;
+esac
 SMOKE_TEST=${SMOKE_TEST-$root/scripts/smoke-test.sh}
 
 command -v tart >/dev/null || { echo "build.sh: tart is not installed (https://tart.run)" >&2; exit 1; }
@@ -110,7 +116,7 @@ if [ -n "$push" ]; then
 	for tag in $TAGS; do refs="$refs $IMAGE:$tag"; done
 	say "Pushing$refs"
 	# shellcheck disable=SC2086
-	tart push "$NAME" $refs --label "org.opencontainers.image.source=${SOURCE_URL:-https://github.com/my-compute-cloud/images}"
+	tart push "$NAME" $refs $PUSH_OPTIONS --label "org.opencontainers.image.source=${SOURCE_URL:-https://github.com/my-compute-cloud/images}"
 else
 	say "Built $NAME. Try it with: tart run $NAME"
 fi

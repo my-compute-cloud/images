@@ -36,7 +36,7 @@ nixpkgs revision pinned in [flake.lock](flake.lock). The list is [modules/tools.
 
 | | GitHub-hosted | These images |
 |---|---|---|
-| Xcode and simulators | Several versions | None. Apple's licence does not let us redistribute Xcode; see [Xcode](#xcode). |
+| Xcode and simulators | Several versions | Not in the image, because Apple's licence does not let us pass Xcode on. The host adds its own; see [Xcode](#xcode). |
 | Tool versions | GitHub's weekly choices | The pinned nixpkgs revision |
 | Version switching | A cache of several Node, Python, Ruby and Go versions | One of each; `actions/setup-node` and its siblings download the version a workflow asks for |
 | Browsers, Android SDK | Installed | Not installed |
@@ -109,6 +109,7 @@ options instead:
 |---|---|
 | `mcc.runner.path` | `PATH`, first entry first. The default puts this configuration's tools ahead of Homebrew's and macOS's. |
 | `mcc.runner.environment` | Other environment variables |
+| `mcc.runner.jobSetup` | Shell commands run just before the runner starts, for what cannot be a fixed variable. The default points package managers' download caches at the host's cache when the host owner provides one (`MCC_CACHE_DIR`). |
 
 The tools are in the read-only Nix store. So that installing with them still works, the
 default `python3` and `pip3` are a virtual environment in `~/.python`, `npm install -g` and
@@ -123,7 +124,13 @@ was built from.
 
 ### Xcode
 
-Build on a base that has Xcode, and keep the result in a private registry:
+You do not need your own image for Xcode. Install Xcode on the host and set
+`"xcode": "/Applications/Xcode.app"` in the agent's policy: the agent copies it into its local
+copy of whichever image a pool uses, once, and every job starts with it. See
+[the agent's documentation](https://github.com/my-compute-cloud/mcc/blob/main/docs/agent.md).
+
+To have Xcode in the image itself, build on a base that has it, and keep the result in a
+private registry:
 
 ```bash
 BASE=ghcr.io/cirruslabs/macos-tahoe-xcode:latest IMAGE=ghcr.io/your-org/macos-runner TAGS=tahoe-xcode scripts/build.sh --push

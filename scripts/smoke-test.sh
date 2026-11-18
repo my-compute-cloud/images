@@ -38,6 +38,10 @@ nix --version
 # Certificates work for the tools Nix built, not only for Apple's.
 git ls-remote https://github.com/actions/checkout HEAD >/dev/null || { echo "git cannot reach github.com over HTTPS"; fail=1; }
 
+# With a cache from the host, package managers are pointed at it; without one, they are not.
+[ -z "${npm_config_cache:-}" ] || { echo "npm's cache is redirected although there is no host cache"; fail=1; }
+(MCC_CACHE_DIR=$(mktemp -d) && . /etc/mcc/job-env && [ "$npm_config_cache" = "$MCC_CACHE_DIR/npm" ]) || { echo "/etc/mcc/job-env does not point npm at the host cache"; fail=1; }
+
 # Installing with the language package managers works and lands on PATH, although the tools
 # themselves are read-only. Cleaned up afterwards: this runs in the image that gets published.
 scratch=$(mktemp -d)
