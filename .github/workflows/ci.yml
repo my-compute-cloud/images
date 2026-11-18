@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Builds the complete system that an image is made from, without making an image: that needs
+  # a VM, which GitHub's hosted Macs cannot run.
+  system:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix flake check -L
+      - name: Scripts parse
+        run: sh -n scripts/build.sh && bash -n scripts/provision.sh && bash -n scripts/smoke-test.sh

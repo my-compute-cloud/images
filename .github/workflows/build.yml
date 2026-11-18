@@ -1,0 +1,44 @@
+name: Build image
+
+# Started by hand. The job needs a Mac that can run Tart VMs, which GitHub's hosted Macs
+# cannot (they are VMs themselves), so it runs on a self-hosted runner labelled `tart`.
+# See "Publishing" in the README before attaching one to this public repository.
+on:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: macOS release of the base image
+        type: choice
+        default: tahoe
+        options: [tahoe, sequoia]
+      push:
+        description: Push the image to ghcr.io
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-${{ inputs.macos }}
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64, tart]
+    timeout-minutes: 240
+    env:
+      MACOS: ${{ inputs.macos }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sign in to ghcr.io
+        if: ${{ inputs.push }}
+        env:
+          TART_REGISTRY_USERNAME: ${{ github.actor }}
+          TART_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$TART_REGISTRY_PASSWORD" | tart login ghcr.io --username "$TART_REGISTRY_USERNAME" --password-stdin
+      - name: Build
+        run: scripts/build.sh ${{ inputs.push && '--push' || '' }}
+      - name: Sign out
+        if: ${{ always() && inputs.push }}
+        run: tart logout ghcr.io
