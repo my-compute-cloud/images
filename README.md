@@ -40,7 +40,9 @@ revision pinned in [flake.lock](flake.lock). Both images get the same list,
 - **Utilities:** Git, Git LFS, GitHub CLI, jq, yq, wget, aria2, GnuPG, zstd, 7-Zip, OpenSSL,
   pkgconf, Ninja, Bazelisk
 - **Tools:** CMake, AWS CLI, AWS SAM CLI, Session Manager plugin, Azure CLI, Bicep, PowerShell
-- **Nix**, with flakes enabled, for jobs that bring their own environment
+- **Nix**: [Determinate Nix](https://docs.determinate.systems/determinate-nix/), with flakes
+  enabled, for jobs that bring their own environment. Its crash reports to Determinate are
+  turned off.
 - **macOS only:** CocoaPods, fastlane, SwiftFormat, xcbeautify, xcodes, GNU tar as `gtar`, GCC
   and GNU Fortran under versioned names such as `gcc-15`; and from the base image, Homebrew,
   Apple's command-line developer tools and Rosetta

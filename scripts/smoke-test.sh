@@ -32,6 +32,7 @@ go version
 java -version 2>&1 | head -1
 dotnet --version
 nix --version
+nix --version | grep -q 'Determinate Nix' || { echo "Nix is not Determinate Nix"; fail=1; }
 
 [ -x "${JAVA_HOME:-}/bin/java" ] || { echo "JAVA_HOME does not point at a JDK"; fail=1; }
 [ -d "${DOTNET_ROOT:-}" ] || { echo "DOTNET_ROOT does not point at a directory"; fail=1; }

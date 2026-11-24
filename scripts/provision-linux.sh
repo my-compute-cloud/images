@@ -10,7 +10,7 @@ revision=$2
 base=$3
 shares=/mnt/mcc
 work="$HOME/.mcc-image-build"
-nix_version=2.34.8
+determinate_version=3.24.3
 
 sudo -n true 2>/dev/null || { echo "provision-linux.sh: this needs sudo without a password in the base image" >&2; exit 1; }
 
@@ -39,15 +39,18 @@ sudo usermod -aG docker "$USER"
 sudo systemctl enable --now docker >/dev/null 2>&1
 
 if [ ! -x /nix/var/nix/profiles/default/bin/nix ]; then
-	echo "Installing Nix $nix_version"
-	curl -fsSL "https://releases.nixos.org/nix/nix-$nix_version/install" -o "$work/install-nix"
-	sh "$work/install-nix" --daemon --yes >/dev/null
+	echo "Installing Determinate Nix $determinate_version"
+	curl -fsSL "https://install.determinate.systems/nix/tag/v$determinate_version" -o "$work/install-nix"
+	sh "$work/install-nix" install --determinate --no-confirm >/dev/null
 fi
 # shellcheck disable=SC1091
 . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
-echo "experimental-features = nix-command flakes
-trusted-users = $USER" | sudo tee -a /etc/nix/nix.conf >/dev/null
-sudo systemctl restart nix-daemon
+# Determinate Nix owns nix.conf and reads added settings from nix.custom.conf. Flakes are on by
+# default. Crash reports would go from customers' jobs to Determinate's Sentry; they are off.
+echo "trusted-users = $USER" | sudo tee -a /etc/nix/nix.custom.conf >/dev/null
+sudo mkdir -p /etc/determinate
+echo '{"telemetry":{"sentry":{"endpoint":null}}}' | sudo tee /etc/determinate/config.json >/dev/null
+sudo systemctl restart nix-daemon 2>/dev/null || sudo systemctl restart determinate-nixd
 
 system=$(nix --extra-experimental-features nix-command eval --impure --raw --expr builtins.currentSystem)
 nix build "path:$work/flake#packages.$system.$package" --out-link "$work/runner"

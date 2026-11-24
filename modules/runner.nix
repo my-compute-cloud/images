@@ -132,15 +132,11 @@ in
       sudo -u ${cfg.user} ${pkgs.python3}/bin/python3 -m venv --clear ${home}/.python
     '';
 
-    # Jobs may use Nix themselves, with flakes and with binary caches of their choosing.
-    nix.settings = {
-      experimental-features = [
-        "nix-command"
-        "flakes"
-      ];
-      trusted-users = [ cfg.user ];
-    };
-    nix.channel.enable = false;
+    # Jobs may use Nix themselves, with flakes (on by default in Determinate Nix) and with
+    # binary caches of their choosing.
+    determinateNix.customSettings.trusted-users = [ cfg.user ];
+    # Crash reports would go from customers' jobs to Determinate's Sentry; they are off.
+    determinateNix.determinateNixd.telemetry.sentry.endpoint = null;
 
     # For people who log in to look around; jobs do not start a login shell. Bash is left
     # alone: enabling it here would put Bash 5 ahead of the Bash 3.2 that macOS and GitHub's

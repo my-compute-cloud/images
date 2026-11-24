@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs inside the VM, started by build.sh: installs Nix if the base lacks it and applies the
+# Runs inside the VM, started by build.sh: installs Determinate Nix if the base lacks Nix and applies the
 # nix-darwin configuration from the flake that build.sh shared into the VM.
 #
 #   provision.sh <configuration> <flake revision> <base image>
@@ -10,7 +10,7 @@ revision=$2
 base=$3
 shared="/Volumes/My Shared Files/flake"
 work="$HOME/.mcc-image-build"
-nix_version=2.34.8
+determinate_version=3.24.3
 
 [ -f "$shared/flake.nix" ] || { echo "provision.sh: the flake is not shared into this VM" >&2; exit 1; }
 sudo -n true 2>/dev/null || { echo "provision.sh: this needs sudo without a password in the base image" >&2; exit 1; }
@@ -21,15 +21,16 @@ mkdir -p "$work/flake"
 cp -R "$shared/." "$work/flake/"
 
 if [ ! -x /nix/var/nix/profiles/default/bin/nix ]; then
-	echo "Installing Nix $nix_version"
-	curl -fsSL "https://releases.nixos.org/nix/nix-$nix_version/install" -o "$work/install-nix"
-	sh "$work/install-nix" --daemon --yes
+	echo "Installing Determinate Nix $determinate_version"
+	curl -fsSL "https://install.determinate.systems/nix/tag/v$determinate_version" -o "$work/install-nix"
+	sh "$work/install-nix" install --determinate --no-confirm
 fi
 # shellcheck disable=SC1091
 . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
 
-# nix-darwin owns these from here on and refuses to replace files it did not write.
-for f in /etc/zshrc /etc/zshenv /etc/nix/nix.conf; do
+# nix-darwin owns these from here on and refuses to replace files it did not write. nix.conf
+# stays Determinate Nix's; the configuration's Nix settings go in nix.custom.conf.
+for f in /etc/zshrc /etc/zshenv /etc/nix/nix.custom.conf; do
 	if [ -e "$f" ] && [ ! -L "$f" ]; then sudo mv "$f" "$f.before-nix-darwin"; fi
 done
 
