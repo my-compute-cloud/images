@@ -7,6 +7,12 @@
       url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Determinate Nix's nix-darwin module: Determinate Nix, which provision.sh installs, manages
+    # the Nix daemon and nix.conf; the module hands it this configuration's Nix settings.
+    determinate = {
+      url = "github:DeterminateSystems/determinate";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -14,6 +20,7 @@
       self,
       nixpkgs,
       nix-darwin,
+      determinate,
     }:
     let
       system = "aarch64-darwin";
@@ -27,7 +34,12 @@
     {
       # macOS: the whole runner configuration as a nix-darwin module, so that your own flake
       # can import it and add to it. See "Build your own image" in the README.
-      darwinModules.runner = ./modules/runner.nix;
+      darwinModules.runner = {
+        imports = [
+          determinate.darwinModules.default
+          ./modules/runner.nix
+        ];
+      };
       darwinModules.default = self.darwinModules.runner;
 
       # What scripts/build.sh applies inside a macOS VM: `darwin-rebuild switch --flake .#runner`.
